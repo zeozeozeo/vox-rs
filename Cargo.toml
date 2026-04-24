@@ -1,0 +1,27 @@
+[package]
+name = "vox-rs"
+description = "A Rust MagicaVoxel .vox file loader and writer"
+license = "Unlicense"
+authors = ["zeozeozeo"]
+homepage = "https://github.com/zeozeozeo/vox-rs"
+repository = "https://github.com/zeozeozeo/vox-rs"
+documentation = "https://github.com/zeozeozeo/vox-rs"
+readme = "README.md"
+keywords = ["magicavoxel", "vox", "loader", "writer", "voxel", "3d"]
+categories = [
+    "rendering::data-formats",
+    "game-development",
+    "no-std",
+    "graphics",
+    "encoding"
+]
+version = "0.1.0"
+edition = "2024"
+exclude = ["/testdata"]
+
+[features]
+default = ["std"]
+std = []
+no_std = []
+
+[dependencies]
