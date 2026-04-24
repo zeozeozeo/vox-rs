@@ -7,7 +7,7 @@ homepage = "https://github.com/zeozeozeo/vox-rs"
 repository = "https://github.com/zeozeozeo/vox-rs"
 documentation = "https://github.com/zeozeozeo/vox-rs"
 readme = "README.md"
-keywords = ["magicavoxel", "vox", "loader", "writer", "voxel", "3d"]
+keywords = ["magicavoxel", "vox", "loader", "voxel", "3d"]
 categories = [
     "rendering::data-formats",
     "game-development",
