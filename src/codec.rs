@@ -1,11 +1,15 @@
 use alloc::borrow::ToOwned;
-use alloc::collections::{BTreeMap, BTreeSet};
+#[cfg(feature = "no_std")]
+use alloc::collections::BTreeMap as DictMap;
+use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::array;
 use core::f32::consts::PI;
+#[cfg(feature = "std")]
+use std::collections::HashMap as DictMap;
 
 use crate::types::{
     AnimModel, AnimTransform, CHUNK_HEADER_LEN, Camera, CameraMode, Group, INVALID_U32_INDEX,
@@ -158,23 +162,23 @@ impl<'a> ByteReader<'a> {
 
     fn read_u32(&mut self) -> Result<u32, VoxError> {
         let bytes = self.read_exact(4)?;
-        Ok(u32::from_le_bytes(
-            bytes.try_into().expect("u32 slice length"),
-        ))
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(bytes);
+        Ok(u32::from_le_bytes(buf))
     }
 
     fn read_i32(&mut self) -> Result<i32, VoxError> {
         let bytes = self.read_exact(4)?;
-        Ok(i32::from_le_bytes(
-            bytes.try_into().expect("i32 slice length"),
-        ))
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(bytes);
+        Ok(i32::from_le_bytes(buf))
     }
 
     fn read_f32(&mut self) -> Result<f32, VoxError> {
         let bytes = self.read_exact(4)?;
-        Ok(f32::from_le_bytes(
-            bytes.try_into().expect("f32 slice length"),
-        ))
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(bytes);
+        Ok(f32::from_le_bytes(buf))
     }
 
     fn read_string_with_length(&mut self) -> Result<String, VoxError> {
@@ -249,14 +253,14 @@ impl ByteWriter {
 
 #[derive(Default)]
 struct Dict {
-    entries: BTreeMap<String, String>,
+    entries: DictMap<String, String>,
 }
 
 impl Dict {
     fn read(reader: &mut ByteReader<'_>) -> Result<Self, VoxError> {
         let num_pairs = usize::try_from(reader.read_u32()?)
             .map_err(|_| VoxError::InvalidData("dictionary pair count overflow".into()))?;
-        let mut entries = BTreeMap::new();
+        let mut entries = DictMap::new();
         for _ in 0..num_pairs {
             let mut key = reader.read_string_with_length()?;
             key.make_ascii_lowercase();
@@ -388,7 +392,7 @@ fn parse_transform(
         let bits = rotation_string.parse::<u32>().map_err(|_| {
             VoxError::InvalidData(format!("invalid rotation value {rotation_string}"))
         })?;
-        let row0_index = (bits >> 0) & 3;
+        let row0_index = bits & 3;
         let row1_index = (bits >> 2) & 3;
         let row2_index = ROW2_INDEX[((1 << row0_index) | (1 << row1_index)) as usize];
         if row2_index == u32::MAX {
@@ -592,6 +596,7 @@ fn default_root_group(layer_index: Option<usize>) -> Group {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_instances_for_node(
     nodes: &[TempNode],
     node_id: u32,
@@ -732,14 +737,14 @@ fn validate_scene_references(scene: &Scene) -> Result<(), VoxError> {
                 return Err(VoxError::InvalidData("group cannot parent itself".into()));
             }
         }
-        if let Some(layer) = group.layer_index {
-            if layer >= scene.layers.len() {
-                return Err(VoxError::IndexOutOfBounds {
-                    kind: "layer",
-                    index: layer,
-                    len: scene.layers.len(),
-                });
-            }
+        if let Some(layer) = group.layer_index
+            && layer >= scene.layers.len()
+        {
+            return Err(VoxError::IndexOutOfBounds {
+                kind: "layer",
+                index: layer,
+                len: scene.layers.len(),
+            });
         }
     }
 
@@ -751,23 +756,23 @@ fn validate_scene_references(scene: &Scene) -> Result<(), VoxError> {
                 len: scene.models.len(),
             });
         }
-        if let Some(layer) = instance.layer_index {
-            if layer >= scene.layers.len() {
-                return Err(VoxError::IndexOutOfBounds {
-                    kind: "layer",
-                    index: layer,
-                    len: scene.layers.len(),
-                });
-            }
+        if let Some(layer) = instance.layer_index
+            && layer >= scene.layers.len()
+        {
+            return Err(VoxError::IndexOutOfBounds {
+                kind: "layer",
+                index: layer,
+                len: scene.layers.len(),
+            });
         }
-        if let Some(group) = instance.group_index {
-            if group >= scene.groups.len() {
-                return Err(VoxError::IndexOutOfBounds {
-                    kind: "group",
-                    index: group,
-                    len: scene.groups.len(),
-                });
-            }
+        if let Some(group) = instance.group_index
+            && group >= scene.groups.len()
+        {
+            return Err(VoxError::IndexOutOfBounds {
+                kind: "group",
+                index: group,
+                len: scene.groups.len(),
+            });
         }
         for keyframe in &instance.model_anim.keyframes {
             if keyframe.model_index >= scene.models.len() {
@@ -916,6 +921,7 @@ fn write_transform_dict_entries(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_ntrn_chunk(
     writer: &mut ByteWriter,
     node_id: u32,
@@ -1019,8 +1025,7 @@ fn find_closest_color_in_palette(
 ) -> usize {
     let mut best_score = i32::MAX;
     let mut best_index = 1usize;
-    for index in 1..palette_count {
-        let candidate = palette[index];
+    for (index, candidate) in palette.iter().enumerate().take(palette_count).skip(1) {
         let r = i32::from(color.r) - i32::from(candidate.r);
         let g = i32::from(color.g) - i32::from(candidate.g);
         let b = i32::from(color.b) - i32::from(candidate.b);
@@ -1127,10 +1132,14 @@ pub(crate) fn read_scene(bytes: &[u8], options: ReadOptions) -> Result<Scene, Vo
                 }
                 let voxel_count = usize::try_from(size_x)
                     .ok()
-                    .and_then(|x| usize::try_from(size_y).ok().map(|y| (x, y)))
+                    .zip(usize::try_from(size_y).ok())
                     .and_then(|(x, y)| usize::try_from(size_z).ok().map(|z| (x, y, z)))
                     .and_then(|(x, y, z)| x.checked_mul(y).and_then(|xy| xy.checked_mul(z)))
                     .ok_or_else(|| VoxError::InvalidData("voxel grid overflow".into()))?;
+                let size_x_usize = usize::try_from(size_x)
+                    .map_err(|_| VoxError::InvalidData("size_x overflow".into()))?;
+                let size_y_usize = usize::try_from(size_y)
+                    .map_err(|_| VoxError::InvalidData("size_y overflow".into()))?;
                 let mut voxels = vec![0u8; voxel_count];
                 for _ in 0..num_voxels {
                     let x = payload_reader.read_u8()?;
@@ -1139,10 +1148,8 @@ pub(crate) fn read_scene(bytes: &[u8], options: ReadOptions) -> Result<Scene, Vo
                     let color_index = payload_reader.read_u8()?;
                     if u32::from(x) < size_x && u32::from(y) < size_y && u32::from(z) < size_z {
                         let index = usize::from(x)
-                            + usize::from(y) * usize::try_from(size_x).unwrap()
-                            + usize::from(z)
-                                * usize::try_from(size_x).unwrap()
-                                * usize::try_from(size_y).unwrap();
+                            + usize::from(y) * size_x_usize
+                            + usize::from(z) * size_x_usize * size_y_usize;
                         voxels[index] = color_index;
                     }
                 }
@@ -1563,15 +1570,11 @@ pub(crate) fn read_scene(bytes: &[u8], options: ReadOptions) -> Result<Scene, Vo
                 if temp_models[j].is_none() {
                     continue;
                 }
-                let equal = {
-                    let lhs = temp_models[i]
-                        .as_ref()
-                        .expect("lhs existence already checked");
-                    let rhs = temp_models[j]
-                        .as_ref()
-                        .expect("rhs existence already checked");
-                    models_equal(lhs, rhs)
+                let (Some(lhs), Some(rhs)) = (temp_models[i].as_ref(), temp_models[j].as_ref())
+                else {
+                    continue;
                 };
+                let equal = models_equal(lhs, rhs);
                 if !equal {
                     continue;
                 }

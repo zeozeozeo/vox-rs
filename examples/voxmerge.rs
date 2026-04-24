@@ -49,9 +49,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let loaded_scenes = inputs
         .iter()
         .map(|path| {
-            read_scene(path).map_err(|error| {
-                format!("failed to load scene from {}: {error}", path.display())
-            })
+            read_scene(path)
+                .map_err(|error| format!("failed to load scene from {}: {error}", path.display()))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
