@@ -16,7 +16,8 @@ fn fixture_bytes(name: &str) -> Vec<u8> {
 }
 
 fn read_fixture(name: &str, options: ReadOptions) -> Scene {
-    Scene::read_with_options(&fixture_bytes(name), options).expect("fixture must parse")
+    let bytes = fixture_bytes(name);
+    Scene::read_with_options(&mut bytes.as_slice(), options).expect("fixture must parse")
 }
 
 fn full_options() -> ReadOptions {
@@ -321,7 +322,8 @@ fn reads_group_fixture() {
 fn round_trips_meta_fixture() {
     let original = read_fixture("test_meta_chunk.vox", full_options());
     let bytes = original.write().expect("scene must serialize");
-    let reparsed = Scene::read_with_options(&bytes, full_options()).expect("round trip must parse");
+    let reparsed = Scene::read_with_options(&mut bytes.as_slice(), full_options())
+        .expect("round trip must parse");
     assert_scene_semantics(&original, &reparsed);
 }
 
@@ -342,8 +344,8 @@ fn merge_supports_write_and_readback() {
     assert_eq!(merged.groups[0].parent_group_index, None);
 
     let bytes = merged.write().expect("merged scene must serialize");
-    let reparsed =
-        Scene::read_with_options(&bytes, full_options()).expect("merged round trip must parse");
+    let reparsed = Scene::read_with_options(&mut bytes.as_slice(), full_options())
+        .expect("merged round trip must parse");
     assert_eq!(reparsed.layers[0].name.as_deref(), Some("merged"));
     assert_eq!(reparsed.instances.len(), merged.instances.len());
     assert_eq!(reparsed.models.len(), merged.models.len());

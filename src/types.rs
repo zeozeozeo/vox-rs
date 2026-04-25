@@ -440,7 +440,7 @@ impl fmt::Display for VoxError {
             Self::WriteCancelled => f.write_str("scene write cancelled"),
             Self::FileTooLarge => f.write_str("generated file exceeds 4 GiB"),
             #[cfg(feature = "std")]
-            Self::IoErrorKind(kind) => write!(f, "i/o error while writing scene: {kind}"),
+            Self::IoErrorKind(kind) => write!(f, "i/o error: {kind}"),
         }
     }
 }
@@ -448,11 +448,27 @@ impl fmt::Display for VoxError {
 impl Error for VoxError {}
 
 impl Scene {
-    pub fn read(bytes: &[u8]) -> Result<Self, VoxError> {
+    #[cfg(feature = "std")]
+    pub fn read<R>(reader: &mut R) -> Result<Self, VoxError>
+    where
+        R: std::io::Read,
+    {
+        crate::codec::read_scene_from_reader(reader, ReadOptions::default())
+    }
+
+    #[cfg(feature = "std")]
+    pub fn read_with_options<R>(reader: &mut R, options: ReadOptions) -> Result<Self, VoxError>
+    where
+        R: std::io::Read,
+    {
+        crate::codec::read_scene_from_reader(reader, options)
+    }
+
+    pub fn read_bytes(bytes: &[u8]) -> Result<Self, VoxError> {
         crate::codec::read_scene(bytes, ReadOptions::default())
     }
 
-    pub fn read_with_options(bytes: &[u8], options: ReadOptions) -> Result<Self, VoxError> {
+    pub fn read_bytes_with_options(bytes: &[u8], options: ReadOptions) -> Result<Self, VoxError> {
         crate::codec::read_scene(bytes, options)
     }
 

@@ -10,6 +10,8 @@ use core::array;
 use core::f32::consts::PI;
 #[cfg(feature = "std")]
 use std::collections::HashMap as DictMap;
+#[cfg(feature = "std")]
+use std::io::Read;
 
 use crate::types::{
     AnimModel, AnimTransform, CHUNK_HEADER_LEN, Camera, CameraMode, Group, INVALID_U32_INDEX,
@@ -155,37 +157,153 @@ impl<'a> ByteReader<'a> {
         self.offset += len;
         Ok(&self.data[start..start + len])
     }
+}
+
+trait VoxRead {
+    fn read_exact_into(&mut self, buf: &mut [u8]) -> Result<(), VoxError>;
+    fn read_exact_or_eof(&mut self, buf: &mut [u8]) -> Result<bool, VoxError>;
 
     fn read_u8(&mut self) -> Result<u8, VoxError> {
-        Ok(self.read_exact(1)?[0])
+        let mut buf = [0u8; 1];
+        self.read_exact_into(&mut buf)?;
+        Ok(buf[0])
     }
 
     fn read_u32(&mut self) -> Result<u32, VoxError> {
-        let bytes = self.read_exact(4)?;
         let mut buf = [0u8; 4];
-        buf.copy_from_slice(bytes);
+        self.read_exact_into(&mut buf)?;
         Ok(u32::from_le_bytes(buf))
     }
 
     fn read_i32(&mut self) -> Result<i32, VoxError> {
-        let bytes = self.read_exact(4)?;
         let mut buf = [0u8; 4];
-        buf.copy_from_slice(bytes);
+        self.read_exact_into(&mut buf)?;
         Ok(i32::from_le_bytes(buf))
     }
 
     fn read_f32(&mut self) -> Result<f32, VoxError> {
-        let bytes = self.read_exact(4)?;
         let mut buf = [0u8; 4];
-        buf.copy_from_slice(bytes);
+        self.read_exact_into(&mut buf)?;
         Ok(f32::from_le_bytes(buf))
     }
 
     fn read_string_with_length(&mut self) -> Result<String, VoxError> {
         let len = usize::try_from(self.read_u32()?)
             .map_err(|_| VoxError::InvalidData("string length overflow".into()))?;
-        let bytes = self.read_exact(len)?;
-        Ok(String::from_utf8_lossy(bytes).into_owned())
+        let mut bytes = vec![0u8; len];
+        self.read_exact_into(&mut bytes)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    fn read_u32_or_eof(&mut self) -> Result<Option<u32>, VoxError> {
+        let mut buf = [0u8; 4];
+        if self.read_exact_or_eof(&mut buf)? {
+            Ok(Some(u32::from_le_bytes(buf)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl VoxRead for ByteReader<'_> {
+    fn read_exact_into(&mut self, buf: &mut [u8]) -> Result<(), VoxError> {
+        buf.copy_from_slice(self.read_exact(buf.len())?);
+        Ok(())
+    }
+
+    fn read_exact_or_eof(&mut self, buf: &mut [u8]) -> Result<bool, VoxError> {
+        if self.remaining() == 0 {
+            return Ok(false);
+        }
+        self.read_exact_into(buf)?;
+        Ok(true)
+    }
+}
+
+struct LimitedReader<'a, R> {
+    inner: &'a mut R,
+    remaining: usize,
+}
+
+impl<'a, R> LimitedReader<'a, R> {
+    fn new(inner: &'a mut R, remaining: usize) -> Self {
+        Self { inner, remaining }
+    }
+
+    fn skip_remaining(&mut self) -> Result<(), VoxError>
+    where
+        R: VoxRead,
+    {
+        let mut buf = [0u8; 8192];
+        while self.remaining > 0 {
+            let len = self.remaining.min(buf.len());
+            self.read_exact_into(&mut buf[..len])?;
+        }
+        Ok(())
+    }
+}
+
+impl<R> VoxRead for LimitedReader<'_, R>
+where
+    R: VoxRead,
+{
+    fn read_exact_into(&mut self, buf: &mut [u8]) -> Result<(), VoxError> {
+        if buf.len() > self.remaining {
+            return Err(VoxError::UnexpectedEof);
+        }
+        self.inner.read_exact_into(buf)?;
+        self.remaining -= buf.len();
+        Ok(())
+    }
+
+    fn read_exact_or_eof(&mut self, buf: &mut [u8]) -> Result<bool, VoxError> {
+        if self.remaining == 0 {
+            return Ok(false);
+        }
+        self.read_exact_into(buf)?;
+        Ok(true)
+    }
+}
+
+#[cfg(feature = "std")]
+struct IoReader<'a, R> {
+    inner: &'a mut R,
+}
+
+#[cfg(feature = "std")]
+impl<'a, R> IoReader<'a, R> {
+    fn new(inner: &'a mut R) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<R> VoxRead for IoReader<'_, R>
+where
+    R: Read,
+{
+    fn read_exact_into(&mut self, buf: &mut [u8]) -> Result<(), VoxError> {
+        self.inner.read_exact(buf).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                VoxError::UnexpectedEof
+            } else {
+                VoxError::IoErrorKind(error.kind())
+            }
+        })
+    }
+
+    fn read_exact_or_eof(&mut self, buf: &mut [u8]) -> Result<bool, VoxError> {
+        let mut offset = 0usize;
+        while offset < buf.len() {
+            match self.inner.read(&mut buf[offset..]) {
+                Ok(0) if offset == 0 => return Ok(false),
+                Ok(0) => return Err(VoxError::UnexpectedEof),
+                Ok(len) => offset += len,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(VoxError::IoErrorKind(error.kind())),
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -257,7 +375,10 @@ struct Dict {
 }
 
 impl Dict {
-    fn read(reader: &mut ByteReader<'_>) -> Result<Self, VoxError> {
+    fn read<R>(reader: &mut R) -> Result<Self, VoxError>
+    where
+        R: VoxRead,
+    {
         let num_pairs = usize::try_from(reader.read_u32()?)
             .map_err(|_| VoxError::InvalidData("dictionary pair count overflow".into()))?;
         let mut entries = DictMap::new();
@@ -1074,6 +1195,25 @@ fn update_master_palette_and_materials_from_scene(
 
 pub(crate) fn read_scene(bytes: &[u8], options: ReadOptions) -> Result<Scene, VoxError> {
     let mut reader = ByteReader::new(bytes);
+    read_scene_from_vox_read(&mut reader, options)
+}
+
+#[cfg(feature = "std")]
+pub(crate) fn read_scene_from_reader<R>(
+    reader: &mut R,
+    options: ReadOptions,
+) -> Result<Scene, VoxError>
+where
+    R: Read,
+{
+    let mut reader = IoReader::new(reader);
+    read_scene_from_vox_read(&mut reader, options)
+}
+
+fn read_scene_from_vox_read<R>(reader: &mut R, options: ReadOptions) -> Result<Scene, VoxError>
+where
+    R: VoxRead,
+{
     let file_header = reader.read_u32()?;
     let file_version = reader.read_u32()?;
     if file_header != CHUNK_ID_VOX_ {
@@ -1100,13 +1240,11 @@ pub(crate) fn read_scene(bytes: &[u8], options: ReadOptions) -> Result<Scene, Vo
     let mut anim_range_start = 0u32;
     let mut anim_range_end = 30u32;
 
-    while reader.remaining() >= CHUNK_HEADER_LEN {
-        let chunk_id = reader.read_u32()?;
+    while let Some(chunk_id) = reader.read_u32_or_eof()? {
         let chunk_size = usize::try_from(reader.read_u32()?)
             .map_err(|_| VoxError::InvalidData("chunk size overflow".into()))?;
         let _chunk_child_size = reader.read_u32()?;
-        let payload = reader.read_exact(chunk_size)?;
-        let mut payload_reader = ByteReader::new(payload);
+        let mut payload_reader = LimitedReader::new(reader, chunk_size);
 
         match chunk_id {
             CHUNK_ID_MAIN => {}
@@ -1430,6 +1568,7 @@ pub(crate) fn read_scene(bytes: &[u8], options: ReadOptions) -> Result<Scene, Vo
             }
             _ => {}
         }
+        payload_reader.skip_remaining()?;
     }
 
     let mut instances = Vec::new();

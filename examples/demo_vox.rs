@@ -1,14 +1,14 @@
 use std::env;
-use std::fs;
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufReader, BufWriter};
 use std::path::Path;
 
 use vox_rs::{ReadOptions, Scene};
 
 fn load_scene(path: &Path, options: ReadOptions) -> Result<Scene, Box<dyn std::error::Error>> {
-    let bytes = fs::read(path)?;
-    Ok(Scene::read_with_options(&bytes, options)?)
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+    Ok(Scene::read_with_options(&mut reader, options)?)
 }
 
 fn save_scene(path: &Path, scene: &Scene) -> Result<(), Box<dyn std::error::Error>> {
