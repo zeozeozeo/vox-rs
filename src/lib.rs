@@ -1,6 +1,7 @@
 #![cfg_attr(feature = "no_std", no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
 
 #[cfg(all(feature = "std", feature = "no_std"))]
 compile_error!(

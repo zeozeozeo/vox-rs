@@ -2146,11 +2146,6 @@ pub(crate) fn merge_scenes(scenes: &[&Scene], required_colors: &[Rgba]) -> Resul
         return Err(VoxError::TooManyRequiredColors(required_colors.len()));
     }
 
-    let normalized_scenes: Vec<Scene> = scenes
-        .iter()
-        .map(|scene| normalize_scene_graph(scene, false))
-        .collect::<Result<_, _>>()?;
-
     let mut master_palette = [Rgba::default(); 256];
     let mut master_materials: [Material; 256] = array::from_fn(|_| Material::default());
     let mut master_palette_count = 1usize;
@@ -2174,11 +2169,12 @@ pub(crate) fn merge_scenes(scenes: &[&Scene], required_colors: &[Rgba]) -> Resul
     }];
 
     let mut offset_x = 0i32;
-    for scene in &normalized_scenes {
+    for scene in scenes {
+        let scene = normalize_scene_graph(scene, false)?;
         let mapping = update_master_palette_and_materials_from_scene(
             &mut master_palette,
             &mut master_palette_count,
-            scene,
+            &scene,
             &mut master_materials,
         );
 
@@ -2193,7 +2189,7 @@ pub(crate) fn merge_scenes(scenes: &[&Scene], required_colors: &[Rgba]) -> Resul
             models.push(remapped);
         }
 
-        let (scene_min_x, scene_max_x) = scene_bounding_box_x(scene);
+        let (scene_min_x, scene_max_x) = scene_bounding_box_x(&scene);
         let scene_offset_x = (offset_x - scene_min_x) as f32;
 
         if scene.groups.is_empty() || scene.groups[0].parent_group_index.is_some() {
