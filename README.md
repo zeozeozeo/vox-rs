@@ -20,4 +20,6 @@ To compile without std, do `vox-rs = { version = "...", default-features = false
 * vox-rs can parse camera, lighting and metadata chunks
 * vox-rs allows for merging multiple .vox files and automatic model deduplication
 * vox-rs provides the user with pre-transformed matrices
+* vox-rs supports both the old (ver. 150) and the new (ver. 200) MagicaVoxel formats
+* vox-rs takes in a generic Reader/Writer trait instead of a byte slice, allowing the user to load files without reading entire contents to memory
 * vox-rs supports `#![no_std]`
